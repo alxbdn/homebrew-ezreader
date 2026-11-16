@@ -19,10 +19,10 @@ cask "ezreader" do
   # The app is signed ad hoc, not notarized by Apple: without this, macOS
   # refuses to open it the first time ("cannot be opened because the
   # developer cannot be verified").
-  postflight do
-    system_command "/usr/bin/xattr",
-                   args:         ["-dr", "com.apple.quarantine", "#{appdir}/EzReader.app"],
-                   must_succeed: false
+  postflight_steps do
+    run "/usr/bin/xattr",
+        args:         ["-dr", "com.apple.quarantine", "{{appdir}}/EzReader.app"],
+        must_succeed: false
   end
 
   zap trash: [
