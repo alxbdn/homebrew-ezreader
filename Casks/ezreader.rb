@@ -1,6 +1,6 @@
 cask "ezreader" do
-  version "1.0.0"
-  sha256 "abd9c85cffe95ecc706c2fcef5502c52dc4ea32c1a83911f5823f5c55d614012"
+  version "1.1.0"
+  sha256 "7d8dd5d64ad583ba841c0391ccc872b5f6e12a2a2cac6e4674f92f3981842f8e"
 
   url "https://github.com/alxbdn/EzReader/releases/download/v#{version}/ezreader-#{version}-macos-universal.dmg"
   name "EzReader"
