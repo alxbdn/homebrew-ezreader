@@ -1,0 +1,60 @@
+name: Try on a Mac
+
+# Installs the cask on a GitHub macOS runner, opens a PDF and takes
+# screenshots (light and dark): a look at the Mac version without a Mac.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  try:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-latest, macos-15-intel]
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install from this tap
+        run: |
+          brew tap alxbdn/ezreader "$GITHUB_WORKSPACE"
+          brew install --cask alxbdn/ezreader/ezreader
+          ls -la /Applications/EzReader.app/Contents/MacOS
+          echo "Quarantine left: $(xattr -p com.apple.quarantine /Applications/EzReader.app 2>/dev/null || echo none)"
+          codesign -dv /Applications/EzReader.app 2>&1 | head -5
+
+      - name: Screenshots
+        run: |
+          set -x
+          mkdir -p shots
+          curl -fsSL -o ~/Desktop/Sample.pdf https://raw.githubusercontent.com/alxbdn/EzReader/main/src-tauri/tests/corpus/pdf14-mixed-sizes-rotated.pdf
+          shoot() { sleep "${2:-4}"; screencapture -x "shots/${{ matrix.runner }}-$1.png" || true; }
+          menu() {
+            osascript -e "tell application \"System Events\" to tell process \"EzReader\" to click menu bar item \"$1\" of menu bar 1" || true
+            shoot "$2" 2
+            osascript -e 'tell application "System Events" to key code 53' || true
+          }
+          for theme in light dark; do
+            if [ "$theme" = dark ]; then
+              osascript -e 'tell application "System Events" to tell appearance preferences to set dark mode to true' \
+                || defaults write -g AppleInterfaceStyle Dark
+            fi
+            open -a EzReader
+            shoot "$theme-1-launcher" 8
+            open -a EzReader ~/Desktop/Sample.pdf
+            shoot "$theme-2-document" 6
+            menu "File" "$theme-3-menu-file"
+            menu "View" "$theme-4-menu-view"
+            osascript -e 'tell application "EzReader" to quit' || pkill -x ezreader-portable || pkill -f EzReader.app || true
+            sleep 3
+          done
+          pgrep -fl EzReader || true
+          ls -la shots
+
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: shots-${{ matrix.runner }}
+          path: shots/
