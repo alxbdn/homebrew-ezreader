@@ -2,8 +2,7 @@ cask "ezreader" do
   version "1.0.0"
   sha256 "abd9c85cffe95ecc706c2fcef5502c52dc4ea32c1a83911f5823f5c55d614012"
 
-  url "https://github.com/alxbdn/EzReader/releases/download/v#{version}/ezreader-#{version}-macos-universal.dmg",
-      verified: "github.com/alxbdn/EzReader/"
+  url "https://github.com/alxbdn/EzReader/releases/download/v#{version}/ezreader-#{version}-macos-universal.dmg"
   name "EzReader"
   desc "Lightweight PDF reader and editor: annotate, sign, edit, compress, protect"
   homepage "https://github.com/alxbdn/EzReader"
@@ -13,7 +12,7 @@ cask "ezreader" do
     strategy :github_latest
   end
 
-  depends_on macos: ">= :big_sur"
+  depends_on macos: :big_sur
 
   app "EzReader.app"
 

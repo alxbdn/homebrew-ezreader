@@ -40,9 +40,9 @@ jobs:
               osascript -e 'tell application "System Events" to tell appearance preferences to set dark mode to true' \
                 || defaults write -g AppleInterfaceStyle Dark
             fi
-            open -a EzReader
+            open /Applications/EzReader.app
             shoot "$theme-1-launcher" 8
-            open -a EzReader ~/Desktop/Sample.pdf
+            open -a /Applications/EzReader.app ~/Desktop/Sample.pdf
             shoot "$theme-2-document" 6
             menu "File" "$theme-3-menu-file"
             menu "View" "$theme-4-menu-view"
