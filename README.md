@@ -1,13 +1,33 @@
 # Homebrew tap for EzReader
 
-[EzReader](https://github.com/alxbdn/EzReader) is a fast, lightweight PDF reader and editor. This tap installs the macOS version (macOS 11 or later, Intel and Apple Silicon):
+[EzReader](https://github.com/alxbdn/EzReader) is a fast, lightweight PDF reader and editor. This tap installs the macOS version (macOS 11 or later, Intel and Apple Silicon).
+
+## Installation
+
+Paste this in the Terminal:
 
 ```bash
 brew install --cask alxbdn/ezreader/ezreader
 ```
 
-Update with `brew upgrade --cask ezreader`, remove with `brew uninstall --cask ezreader` (add `--zap` to also remove its settings).
+No Homebrew yet? Install it first, then run the line above:
 
-The app is signed ad hoc but not notarized by Apple, so the cask removes the quarantine flag after installing it: EzReader opens straight away, with no "unidentified developer" warning.
+```bash
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+```
+
+EzReader is then in Applications and opens straight away.
+
+## Update and remove
+
+```bash
+brew upgrade --cask ezreader              # update
+brew uninstall --cask ezreader            # remove
+brew uninstall --zap --cask ezreader      # remove, settings included
+```
+
+## Notes
+
+The app is signed ad hoc but not notarized by Apple, so the cask removes the quarantine flag after installing it: EzReader opens with no "unidentified developer" warning.
 
 The cask follows EzReader's releases on its own (see `.github/workflows/update-cask.yml`).
