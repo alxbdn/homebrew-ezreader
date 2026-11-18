@@ -30,4 +30,4 @@ brew uninstall --zap --cask ezreader      # remove, settings included
 
 The app is signed ad hoc but not notarized by Apple, so the cask removes the quarantine flag after installing it: EzReader opens with no "unidentified developer" warning.
 
-The cask follows EzReader's releases on its own (see `.github/workflows/update-cask.yml`).
+The macOS app is built here, not in the EzReader repository: for each EzReader release, `.github/workflows/macos-release.yml` builds the universal disk image from that tag, publishes it as a release of this tap and points the cask at it. macOS runners on GitHub are often busy, so a dropped build is retried every hour without holding back EzReader's own release.

@@ -1,0 +1,220 @@
+name: macOS release
+
+# Follows the releases of alxbdn/EzReader. For each new version, this workflow
+# builds the universal macOS disk image (Intel and Apple Silicon) from that
+# tag, publishes it as a release of this tap, then points the cask at it.
+#
+# macOS runners are scarce on GitHub and jobs often get dropped. Building here
+# keeps that from holding back EzReader's own release: a dropped run is simply
+# retried on the next schedule.
+
+on:
+  schedule:
+    - cron: '17 * * * *'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'EzReader tag to build (e.g. v1.1.8, empty = latest release)'
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: macos-release
+  cancel-in-progress: false
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.check.outputs.tag }}
+      version: ${{ steps.check.outputs.version }}
+      build: ${{ steps.check.outputs.build }}
+      copy: ${{ steps.check.outputs.copy }}
+    steps:
+      - name: Find the version to ship
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          TAG="${INPUT_TAG:-$(gh api repos/alxbdn/EzReader/releases/latest --jq .tag_name)}"
+          TAG="v${TAG#v}"
+          VERSION="${TAG#v}"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' 2>/dev/null \
+               | grep -qx "ezreader-${VERSION}-macos-universal.dmg"; then
+            echo "build=false" >> "$GITHUB_OUTPUT"
+            echo "${TAG} is already built"
+          elif gh api "repos/alxbdn/EzReader/releases/tags/${TAG}" --jq '.assets[].name' \
+                 | grep -qx "ezreader-${VERSION}-macos-universal.dmg"; then
+            echo "build=false" >> "$GITHUB_OUTPUT"
+            echo "copy=true" >> "$GITHUB_OUTPUT"
+            echo "${TAG} already has a disk image in EzReader's release: copy it"
+          else
+            echo "build=true" >> "$GITHUB_OUTPUT"
+            echo "${TAG} needs a macOS build"
+          fi
+
+  # Releases from before the tap built the disk image: reuse the one that
+  # EzReader's release already holds.
+  copy:
+    needs: check
+    if: needs.check.outputs.copy == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Copy the disk image from EzReader's release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.check.outputs.tag }}
+          VERSION: ${{ needs.check.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir dist
+          gh release download "$TAG" --repo alxbdn/EzReader --dir dist \
+            --pattern "ezreader-${VERSION}-macos-universal.dmg" --pattern "ezreader-${VERSION}-macos.intoto.jsonl"
+          NOTES="EzReader ${VERSION} for macOS (universal: Intel and Apple Silicon), copied from [alxbdn/EzReader@${TAG}](https://github.com/alxbdn/EzReader/releases/tag/${TAG}). Install it with \`brew install --cask alxbdn/ezreader/ezreader\`."
+          gh release create "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --title "EzReader ${VERSION} for macOS" --notes "$NOTES"
+
+  build:
+    needs: check
+    if: needs.check.outputs.build == 'true'
+    runs-on: macos-latest
+    timeout-minutes: 60
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - name: Checkout EzReader ${{ needs.check.outputs.tag }}
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: alxbdn/EzReader
+          ref: ${{ needs.check.outputs.tag }}
+          path: app
+
+      - name: Setup Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: app/package-lock.json
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: app/src-tauri
+
+      - name: Set the version in tauri.conf.json
+        working-directory: app
+        env:
+          BUILD_VERSION: ${{ needs.check.outputs.version }}
+        run: |
+          node -e '
+            const fs = require("fs");
+            const path = "src-tauri/tauri.conf.json";
+            const conf = JSON.parse(fs.readFileSync(path, "utf8"));
+            conf.version = process.env.BUILD_VERSION;
+            fs.writeFileSync(path, JSON.stringify(conf, null, 2) + "\n");
+          '
+
+      - name: Install frontend dependencies
+        working-directory: app
+        run: npm ci
+
+      - name: Build universal app and disk image
+        working-directory: app
+        run: npx tauri build --target universal-apple-darwin --bundles app,dmg
+
+      - name: Check the app
+        working-directory: app
+        run: |
+          APP="src-tauri/target/universal-apple-darwin/release/bundle/macos/EzReader.app"
+          BIN="$APP/Contents/MacOS/$(/usr/libexec/PlistBuddy -c "Print :CFBundleExecutable" "$APP/Contents/Info.plist")"
+          ARCHS="$(lipo -archs "$BIN")"
+          echo "Architectures: $ARCHS"
+          [[ "$ARCHS" == *x86_64* && "$ARCHS" == *arm64* ]]
+          codesign --verify --deep --strict "$APP"
+
+      - name: Stage disk image
+        id: stage
+        run: |
+          VERSION="${{ needs.check.outputs.version }}"
+          DMG="ezreader-${VERSION}-macos-universal.dmg"
+          mkdir -p dist
+          cp app/src-tauri/target/universal-apple-darwin/release/bundle/dmg/EzReader_*_universal.dmg "dist/${DMG}"
+          shasum -a 256 "dist/${DMG}"
+          echo "dmg=${DMG}" >> "$GITHUB_OUTPUT"
+
+      # SLSA build provenance, signed with Sigstore. Check a download with:
+      #   gh attestation verify <file> --repo alxbdn/homebrew-ezreader
+      - name: Attest build provenance
+        id: attest
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: dist/${{ steps.stage.outputs.dmg }}
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.check.outputs.tag }}
+          VERSION: ${{ needs.check.outputs.version }}
+        run: |
+          set -euo pipefail
+          cp "${{ steps.attest.outputs.bundle-path }}" "dist/ezreader-${VERSION}-macos.intoto.jsonl"
+          NOTES="EzReader ${VERSION} for macOS (universal: Intel and Apple Silicon), built from [alxbdn/EzReader@${TAG}](https://github.com/alxbdn/EzReader/releases/tag/${TAG}). Install it with \`brew install --cask alxbdn/ezreader/ezreader\`."
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/* --clobber --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+              --title "EzReader ${VERSION} for macOS" --notes "$NOTES"
+          fi
+
+  cask:
+    needs: [check, build, copy]
+    if: >-
+      always() && needs.check.result == 'success' &&
+      (needs.build.result == 'success' || needs.build.result == 'skipped') &&
+      (needs.copy.result == 'success' || needs.copy.result == 'skipped')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Point the cask at the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.check.outputs.tag }}
+          VERSION: ${{ needs.check.outputs.version }}
+        run: |
+          set -euo pipefail
+          CURRENT="$(sed -n 's/^  version "\(.*\)"$/\1/p' Casks/ezreader.rb)"
+          if [[ "$CURRENT" == "$VERSION" ]]; then
+            echo "Already at ${VERSION}"; exit 0
+          fi
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" \
+            --pattern "ezreader-${VERSION}-macos-universal.dmg" --output ezreader.dmg
+          SHA="$(sha256sum ezreader.dmg | cut -d' ' -f1)"
+          rm ezreader.dmg
+          sed -i "s/^  version \".*\"$/  version \"${VERSION}\"/; s/^  sha256 \".*\"$/  sha256 \"${SHA}\"/" Casks/ezreader.rb
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "ezreader ${VERSION}"
+          git push
