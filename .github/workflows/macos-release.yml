@@ -36,6 +36,7 @@ jobs:
       tag: ${{ steps.check.outputs.tag }}
       version: ${{ steps.check.outputs.version }}
       build: ${{ steps.check.outputs.build }}
+      copy: ${{ steps.check.outputs.copy }}
     steps:
       - name: Find the version to ship
         id: check
@@ -53,10 +54,38 @@ jobs:
                | grep -qx "ezreader-${VERSION}-macos-universal.dmg"; then
             echo "build=false" >> "$GITHUB_OUTPUT"
             echo "${TAG} is already built"
+          elif gh api "repos/alxbdn/EzReader/releases/tags/${TAG}" --jq '.assets[].name' \
+                 | grep -qx "ezreader-${VERSION}-macos-universal.dmg"; then
+            echo "build=false" >> "$GITHUB_OUTPUT"
+            echo "copy=true" >> "$GITHUB_OUTPUT"
+            echo "${TAG} already has a disk image in EzReader's release: copy it"
           else
             echo "build=true" >> "$GITHUB_OUTPUT"
             echo "${TAG} needs a macOS build"
           fi
+
+  # Releases from before the tap built the disk image: reuse the one that
+  # EzReader's release already holds.
+  copy:
+    needs: check
+    if: needs.check.outputs.copy == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Copy the disk image from EzReader's release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.check.outputs.tag }}
+          VERSION: ${{ needs.check.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir dist
+          gh release download "$TAG" --repo alxbdn/EzReader --dir dist \
+            --pattern "ezreader-${VERSION}-macos-universal.dmg" --pattern "ezreader-${VERSION}-macos.intoto.jsonl"
+          NOTES="EzReader ${VERSION} for macOS (universal: Intel and Apple Silicon), copied from [alxbdn/EzReader@${TAG}](https://github.com/alxbdn/EzReader/releases/tag/${TAG}). Install it with \`brew install --cask alxbdn/ezreader/ezreader\`."
+          gh release create "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --title "EzReader ${VERSION} for macOS" --notes "$NOTES"
 
   build:
     needs: check
@@ -158,8 +187,11 @@ jobs:
           fi
 
   cask:
-    needs: [check, build]
-    if: always() && needs.check.result == 'success' && (needs.build.result == 'success' || needs.build.result == 'skipped')
+    needs: [check, build, copy]
+    if: >-
+      always() && needs.check.result == 'success' &&
+      (needs.build.result == 'success' || needs.build.result == 'skipped') &&
+      (needs.copy.result == 'success' || needs.copy.result == 'skipped')
     runs-on: ubuntu-latest
     permissions:
       contents: write
