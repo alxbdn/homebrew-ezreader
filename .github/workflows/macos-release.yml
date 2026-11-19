@@ -196,7 +196,11 @@ jobs:
     permissions:
       contents: write
     steps:
+      # The latest main, not the commit this run started from: a run queued
+      # behind another may find the cask already updated.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
 
       - name: Point the cask at the release
         env:
